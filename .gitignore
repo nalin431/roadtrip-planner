@@ -1,26 +1,37 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+# --- frontend (Next.js) ---
+frontend/node_modules
+frontend/.pnp
+frontend/.pnp.*
+frontend/.yarn/*
+!frontend/.yarn/patches
+!frontend/.yarn/plugins
+!frontend/.yarn/releases
+!frontend/.yarn/versions
+frontend/coverage
+frontend/.next/
+frontend/out/
+frontend/build
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
+frontend/.vercel
 
-# testing
-/coverage
+# --- backend (Go) ---
+backend/tmp/
+backend/bin/
+backend/*.exe
+backend/*.test
+backend/coverage.out
 
-# next.js
-/.next/
-/out/
+# --- infra (CDK) ---
+infra/node_modules
+infra/cdk.out/
+infra/*.d.ts
+infra/*.js
+!infra/jest.config.js
 
-# production
-/build
-
-# misc
+# --- misc ---
 .DS_Store
 *.pem
 
@@ -33,10 +44,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 .env.local
+**/.env
+**/.env.local
 
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# IDE
+.vscode/
+.idea/
