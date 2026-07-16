@@ -30,6 +30,10 @@ extend-exclude = ["app/db/migrations/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# B008: FastAPI's dependency injection idiom is Depends(...) in argument
+# defaults -- that's correct usage here, not the mutable-default-argument
+# footgun this rule normally catches.
+ignore = ["B008"]
 
 [tool.mypy]
 python_version = "3.12"
