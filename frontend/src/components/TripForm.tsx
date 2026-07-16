@@ -1,427 +1,384 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { TripPlan, Stop, AITripPreferences, DayPlan } from '@/types/trip';
-import { createBasicTripPlan } from '@/utils/basicTripPlanner';
+import { useState } from 'react';
+import type { Trip, Waypoint } from '@/types/trip';
+import { apiClient, ApiRequestError } from '@/lib/apiClient';
+import DetourDial from './DetourDial';
 
 interface TripFormProps {
-  onTripPlanUpdate: (tripPlan: TripPlan) => void;
-  onDayPlansUpdate?: (dayPlans: DayPlan[]) => void;
+  onTripCreated: (trip: Trip) => void;
 }
 
-export default function TripForm({ onTripPlanUpdate, onDayPlansUpdate }: TripFormProps) {
-  const [tripName, setTripName] = useState('');
-  const [startPoint, setStartPoint] = useState('');
-  const [endPoint, setEndPoint] = useState('');
-  const [isReturnTrip, setIsReturnTrip] = useState(true);
-  const [stops, setStops] = useState<Stop[]>([]);
-  const [newStop, setNewStop] = useState('');
+const ATTRACTION_TYPES = [
+  { value: 'tourist_attraction', label: 'Landmarks' },
+  { value: 'natural_feature', label: 'Scenic & Nature' },
+  { value: 'park', label: 'Parks & Trails' },
+  { value: 'museum', label: 'Museums' },
+  { value: 'restaurant', label: 'Food' },
+  { value: 'cafe', label: 'Coffee & Cafes' },
+];
+
+// Trip form doesn't yet geocode free-text locations into coordinates — that
+// requires the Places Geocoding API. For now, start/end/waypoint coordinates
+// are entered directly. Geocoding-on-submit is a natural Phase 5 follow-up
+// once the algorithm consumes these coordinates for real.
+export default function TripForm({ onTripCreated }: TripFormProps) {
+  const [name, setName] = useState('');
+  const [startLocation, setStartLocation] = useState('');
+  const [startLat, setStartLat] = useState('');
+  const [startLng, setStartLng] = useState('');
+  const [endLocation, setEndLocation] = useState('');
+  const [endLat, setEndLat] = useState('');
+  const [endLng, setEndLng] = useState('');
+  const [isReturnTrip, setIsReturnTrip] = useState(false);
+  const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
+  const [waypointDraft, setWaypointDraft] = useState({ location: '', lat: '', lng: '' });
+  const [totalDays, setTotalDays] = useState(5);
   const [maxDrivingHoursPerDay, setMaxDrivingHoursPerDay] = useState(6);
-  const [preferredAccommodationTypes, setPreferredAccommodationTypes] = useState<string[]>(['hotel', 'motel']);
-  const [preferredAttractionTypes, setPreferredAttractionTypes] = useState<string[]>(['scenic', 'hiking']);
+  const [detourBudgetPct, setDetourBudgetPct] = useState(10);
   const [budget, setBudget] = useState('');
-  const [totalDays, setTotalDays] = useState(7);
-  const [useAI, setUseAI] = useState(true);
-  const [aiFocus, setAiFocus] = useState('nature');
-  const [isLoading, setIsLoading] = useState(false);
+  const [attractionTypes, setAttractionTypes] = useState<string[]>(['tourist_attraction', 'natural_feature']);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const accommodationTypes = [
-    { value: 'hotel', label: 'Hotels' },
-    { value: 'motel', label: 'Motels' },
-    { value: 'hostel', label: 'Hostels' },
-    { value: 'campground', label: 'Campgrounds' },
-    { value: 'bnb', label: 'B&Bs' }
-  ];
-
-  const attractionTypes = [
-    { value: 'hiking', label: 'Hiking Trails' },
-    { value: 'scenic', label: 'Scenic Views' },
-    { value: 'cultural', label: 'Cultural Sites' },
-    { value: 'food', label: 'Restaurants' },
-    { value: 'entertainment', label: 'Entertainment' }
-  ];
-
-  const addStop = () => {
-    if (!newStop.trim()) return;
-    
-    const stop: Stop = {
-      id: `stop-${Date.now()}`,
-      name: newStop,
-      location: newStop,
-      type: 'waypoint',
-      order: stops.length + 1
-    };
-    
-    setStops([...stops, stop]);
-    setNewStop('');
+  const toggleAttractionType = (value: string) => {
+    setAttractionTypes((prev) =>
+      prev.includes(value) ? prev.filter((t) => t !== value) : [...prev, value]
+    );
   };
 
-  const removeStop = (stopId: string) => {
-    setStops(stops.filter(stop => stop.id !== stopId));
+  const addWaypoint = () => {
+    const lat = parseFloat(waypointDraft.lat);
+    const lng = parseFloat(waypointDraft.lng);
+    if (!waypointDraft.location.trim() || Number.isNaN(lat) || Number.isNaN(lng)) return;
+    setWaypoints((prev) => [...prev, { location: waypointDraft.location, lat, lng }]);
+    setWaypointDraft({ location: '', lat: '', lng: '' });
   };
 
-  const moveStop = (stopId: string, direction: 'up' | 'down') => {
-    const stopIndex = stops.findIndex(stop => stop.id === stopId);
-    if (stopIndex === -1) return;
+  const removeWaypoint = (index: number) => {
+    setWaypoints((prev) => prev.filter((_, i) => i !== index));
+  };
 
-    const newStops = [...stops];
-    if (direction === 'up' && stopIndex > 0) {
-      [newStops[stopIndex], newStops[stopIndex - 1]] = [newStops[stopIndex - 1], newStops[stopIndex]];
-    } else if (direction === 'down' && stopIndex < newStops.length - 1) {
-      [newStops[stopIndex], newStops[stopIndex + 1]] = [newStops[stopIndex + 1], newStops[stopIndex]];
-    }
-
-    // Update order numbers
-    newStops.forEach((stop, index) => {
-      stop.order = index + 1;
+  const moveWaypoint = (index: number, direction: -1 | 1) => {
+    setWaypoints((prev) => {
+      const target = index + direction;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
     });
-
-    setStops(newStops);
   };
 
-  const handleAccommodationTypeChange = (type: string) => {
-    setPreferredAccommodationTypes(prev => 
-      prev.includes(type) 
-        ? prev.filter(t => t !== type)
-        : [...prev, type]
-    );
-  };
+  const isValid =
+    name.trim() &&
+    startLocation.trim() &&
+    endLocation.trim() &&
+    startLat &&
+    startLng &&
+    endLat &&
+    endLng;
 
-  const handleAttractionTypeChange = (type: string) => {
-    setPreferredAttractionTypes(prev => 
-      prev.includes(type) 
-        ? prev.filter(t => t !== type)
-        : [...prev, type]
-    );
-  };
-
-  // Auto-populate end point when return trip is checked and start point changes
-  useEffect(() => {
-    if (isReturnTrip && startPoint) {
-      setEndPoint(startPoint);
-    }
-  }, [isReturnTrip, startPoint]);
-
-  const handlePlanTrip = async () => {
-    if (!tripName || !startPoint || !endPoint) {
-      alert('Please fill in all required fields');
+  const handleSubmit = async () => {
+    if (!isValid) {
+      setError('Fill in trip name, start, and end before logging the route.');
       return;
     }
 
-    setIsLoading(true);
-    
+    setIsSubmitting(true);
+    setError(null);
+
     try {
-      const tripPlan: TripPlan = {
-        id: `trip-${Date.now()}`,
-        name: tripName,
-        startPoint,
-        endPoint,
+      const trip = await apiClient.createTrip({
+        name,
+        startLocation,
+        startLat: parseFloat(startLat),
+        startLng: parseFloat(startLng),
+        endLocation,
+        endLat: parseFloat(endLat),
+        endLng: parseFloat(endLng),
         isReturnTrip,
         totalDays,
-        stops: [
-          { id: 'start', name: 'Start', location: startPoint, type: 'start', order: 0 },
-          ...stops,
-          { id: 'end', name: 'End', location: endPoint, type: 'destination', order: stops.length + 1 }
-        ],
-        dayPlans: [], // Will be populated by the planner
-        totalDistance: 0,
-        totalDuration: 0,
-        preferences: {
-          maxDrivingHoursPerDay,
-          preferredAccommodationTypes,
-          preferredAttractionTypes,
-          budget: budget ? parseFloat(budget) : undefined
-        },
-        useAI
-      };
-
-      onTripPlanUpdate(tripPlan);
-
-      // Create basic day plans if AI is disabled
-      if (!useAI && onDayPlansUpdate) {
-        console.log('Creating basic day plans...');
-        const basicDayPlans = createBasicTripPlan(tripPlan);
-        console.log('Basic day plans created:', basicDayPlans);
-        onDayPlansUpdate(basicDayPlans);
-      }
-    } catch (error) {
-      console.error('Error planning trip:', error);
-      alert('Error planning trip. Please try again.');
+        maxDrivingHoursPerDay,
+        detourBudgetPct,
+        budget: budget ? parseFloat(budget) : undefined,
+        preferredAttractionTypes: attractionTypes,
+        waypoints,
+      });
+      onTripCreated(trip);
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : 'Could not log this trip. Try again.');
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6">
-      <h2 className="text-2xl font-semibold text-gray-800 mb-6">
-        Plan Your Multi-Stop Trip
-      </h2>
-      
-      <div className="space-y-6">
-        {/* Basic Trip Info */}
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="tripName" className="block text-sm font-medium text-gray-700 mb-2">
-              Trip Name *
-            </label>
-            <input
-              type="text"
-              id="tripName"
-              value={tripName}
-              onChange={(e) => setTripName(e.target.value)}
-              placeholder="My Amazing Road Trip"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
-            />
-          </div>
+    <div className="rounded-lg border border-dusk/30 bg-parchment-deep/60 p-6 shadow-sm">
+      <p className="font-mono text-xs uppercase tracking-widest text-ranger">Trail Log</p>
+      <h2 className="mt-1 font-display text-2xl font-medium text-canopy">Plot the route</h2>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="startPoint" className="block text-sm font-medium text-gray-700 mb-2">
-                Starting Point *
-              </label>
-              <input
-                type="text"
-                id="startPoint"
-                value={startPoint}
-                onChange={(e) => setStartPoint(e.target.value)}
-                placeholder="Enter starting location..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="endPoint" className="block text-sm font-medium text-gray-700 mb-2">
-                End Point *
-              </label>
-              <input
-                type="text"
-                id="endPoint"
-                value={endPoint}
-                onChange={(e) => setEndPoint(e.target.value)}
-                placeholder="Enter end location..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              id="returnTrip"
-              checked={isReturnTrip}
-              onChange={(e) => {
-                setIsReturnTrip(e.target.checked);
-                if (e.target.checked && startPoint) {
-                  setEndPoint(startPoint);
-                }
-              }}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <label htmlFor="returnTrip" className="text-sm text-gray-700">
-              Return to starting point (round trip)
-            </label>
-          </div>
-
-
+      <div className="mt-6 space-y-6">
+        <div>
+          <label htmlFor="tripName" className="mb-1.5 block text-sm font-medium text-canopy/80">
+            Trip name
+          </label>
+          <input
+            id="tripName"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Pacific Coast, week two"
+            className="w-full rounded-md border border-dusk/40 bg-parchment px-3 py-2 text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
+          />
         </div>
 
-        {/* Stops Management */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <fieldset className="space-y-2 rounded-md border border-dusk/30 p-3">
+            <legend className="px-1 font-mono text-xs uppercase tracking-widest text-ranger">Start</legend>
+            <input
+              type="text"
+              value={startLocation}
+              onChange={(e) => setStartLocation(e.target.value)}
+              placeholder="Name (e.g. San Francisco, CA)"
+              className="w-full rounded-md border border-dusk/40 bg-parchment px-3 py-2 text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
+            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                inputMode="decimal"
+                value={startLat}
+                onChange={(e) => setStartLat(e.target.value)}
+                placeholder="Lat"
+                className="w-1/2 rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
+              />
+              <input
+                type="text"
+                inputMode="decimal"
+                value={startLng}
+                onChange={(e) => setStartLng(e.target.value)}
+                placeholder="Lng"
+                className="w-1/2 rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
+              />
+            </div>
+          </fieldset>
+
+          <fieldset className="space-y-2 rounded-md border border-dusk/30 p-3">
+            <legend className="px-1 font-mono text-xs uppercase tracking-widest text-ranger">End</legend>
+            <input
+              type="text"
+              value={endLocation}
+              onChange={(e) => setEndLocation(e.target.value)}
+              placeholder="Name (e.g. Seattle, WA)"
+              disabled={isReturnTrip}
+              className="w-full rounded-md border border-dusk/40 bg-parchment px-3 py-2 text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none disabled:opacity-50"
+            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                inputMode="decimal"
+                value={endLat}
+                onChange={(e) => setEndLat(e.target.value)}
+                placeholder="Lat"
+                disabled={isReturnTrip}
+                className="w-1/2 rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none disabled:opacity-50"
+              />
+              <input
+                type="text"
+                inputMode="decimal"
+                value={endLng}
+                onChange={(e) => setEndLng(e.target.value)}
+                placeholder="Lng"
+                disabled={isReturnTrip}
+                className="w-1/2 rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none disabled:opacity-50"
+              />
+            </div>
+          </fieldset>
+        </div>
+
+        <label className="flex items-center gap-2 text-sm text-canopy/80">
+          <input
+            type="checkbox"
+            checked={isReturnTrip}
+            onChange={(e) => {
+              setIsReturnTrip(e.target.checked);
+              if (e.target.checked) {
+                setEndLocation(startLocation);
+                setEndLat(startLat);
+                setEndLng(startLng);
+              }
+            }}
+            className="h-4 w-4 rounded border-dusk text-trail-rust focus:ring-trail-rust"
+          />
+          Loop back to the start
+        </label>
+
+        {/* Waypoints — a stamped trail log, order carries real meaning here */}
         <div>
-          <h3 className="text-lg font-medium text-gray-700 mb-3">Stops Along the Way</h3>
-          
-          <div className="space-y-2">
-            {stops.map((stop, index) => (
-              <div key={stop.id} className="flex items-center space-x-2 p-3 bg-gray-50 rounded-md">
-                <span className="text-sm font-medium text-gray-600 w-6">{stop.order}</span>
-                <span className="flex-1 text-sm">{stop.name}</span>
-                <div className="flex space-x-1">
+          <p className="mb-2 font-mono text-xs uppercase tracking-widest text-ranger">
+            Stops, in order
+          </p>
+          <ol className="space-y-2">
+            {waypoints.map((wp, i) => (
+              <li
+                key={`${wp.location}-${i}`}
+                className="flex items-center gap-3 rounded-md border border-dusk/30 bg-parchment px-3 py-2"
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-trail-rust font-mono text-xs font-semibold text-trail-rust">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <span className="flex-1 text-sm text-canopy">{wp.location}</span>
+                <div className="flex gap-1">
                   <button
-                    onClick={() => moveStop(stop.id, 'up')}
-                    disabled={index === 0}
-                    className="px-2 py-1 text-xs bg-blue-500 text-white rounded disabled:bg-gray-300"
+                    type="button"
+                    onClick={() => moveWaypoint(i, -1)}
+                    disabled={i === 0}
+                    aria-label={`Move ${wp.location} earlier`}
+                    className="rounded px-2 py-1 text-xs text-ranger hover:bg-ranger/10 disabled:opacity-30"
                   >
                     ↑
                   </button>
                   <button
-                    onClick={() => moveStop(stop.id, 'down')}
-                    disabled={index === stops.length - 1}
-                    className="px-2 py-1 text-xs bg-blue-500 text-white rounded disabled:bg-gray-300"
+                    type="button"
+                    onClick={() => moveWaypoint(i, 1)}
+                    disabled={i === waypoints.length - 1}
+                    aria-label={`Move ${wp.location} later`}
+                    className="rounded px-2 py-1 text-xs text-ranger hover:bg-ranger/10 disabled:opacity-30"
                   >
                     ↓
                   </button>
                   <button
-                    onClick={() => removeStop(stop.id)}
-                    className="px-2 py-1 text-xs bg-red-500 text-white rounded"
+                    type="button"
+                    onClick={() => removeWaypoint(i)}
+                    aria-label={`Remove ${wp.location}`}
+                    className="rounded px-2 py-1 text-xs text-trail-rust hover:bg-trail-rust/10"
                   >
-                    ×
+                    ✕
                   </button>
                 </div>
-              </div>
+              </li>
             ))}
-          </div>
+          </ol>
 
-          <div className="flex space-x-2 mt-3">
+          <div className="mt-3 flex flex-wrap gap-2">
             <input
               type="text"
-              value={newStop}
-              onChange={(e) => setNewStop(e.target.value)}
-              placeholder="Add a stop..."
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
-              onKeyPress={(e) => e.key === 'Enter' && addStop()}
+              value={waypointDraft.location}
+              onChange={(e) => setWaypointDraft((d) => ({ ...d, location: e.target.value }))}
+              placeholder="Stop name"
+              className="min-w-[10rem] flex-1 rounded-md border border-dusk/40 bg-parchment px-3 py-2 text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
+            />
+            <input
+              type="text"
+              inputMode="decimal"
+              value={waypointDraft.lat}
+              onChange={(e) => setWaypointDraft((d) => ({ ...d, lat: e.target.value }))}
+              placeholder="Lat"
+              className="w-20 rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
+            />
+            <input
+              type="text"
+              inputMode="decimal"
+              value={waypointDraft.lng}
+              onChange={(e) => setWaypointDraft((d) => ({ ...d, lng: e.target.value }))}
+              placeholder="Lng"
+              className="w-20 rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
             />
             <button
-              onClick={addStop}
-              disabled={!newStop.trim()}
-              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-300"
+              type="button"
+              onClick={addWaypoint}
+              className="rounded-md bg-ranger px-4 py-2 text-sm font-medium text-parchment transition-colors hover:bg-ranger/90"
             >
-              Add
+              Add stop
             </button>
           </div>
         </div>
 
-        {/* Trip Preferences */}
-        <div>
-          <h3 className="text-lg font-medium text-gray-700 mb-3">Trip Preferences</h3>
-          
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="maxDrivingHours" className="block text-sm font-medium text-gray-700 mb-2">
-                Max Driving Hours Per Day
-              </label>
-              <input
-                type="range"
-                id="maxDrivingHours"
-                min="2"
-                max="10"
-                value={maxDrivingHoursPerDay}
-                onChange={(e) => setMaxDrivingHoursPerDay(parseInt(e.target.value))}
-                className="w-full"
-              />
-              <span className="text-sm text-gray-600">{maxDrivingHoursPerDay} hours</span>
-            </div>
+        {/* Detour budget — the signature control. How far this trip is
+            willing to wander for something worth seeing. */}
+        <div className="flex flex-col items-center gap-2 border-t border-dusk/20 pt-6">
+          <DetourDial value={detourBudgetPct} onChange={setDetourBudgetPct} />
+          <p className="max-w-[16rem] text-center text-xs text-canopy/60">
+            How far the route can wander off the direct path to pick up worthwhile stops
+          </p>
+        </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Preferred Accommodation Types
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {accommodationTypes.map(type => (
-                  <label key={type.value} className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      checked={preferredAccommodationTypes.includes(type.value)}
-                      onChange={() => handleAccommodationTypeChange(type.value)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-sm text-gray-700">{type.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Preferred Attraction Types
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {attractionTypes.map(type => (
-                  <label key={type.value} className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      checked={preferredAttractionTypes.includes(type.value)}
-                      onChange={() => handleAttractionTypeChange(type.value)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-sm text-gray-700">{type.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="budget" className="block text-sm font-medium text-gray-700 mb-2">
-                Budget (optional)
-              </label>
-              <input
-                type="number"
-                id="budget"
-                value={budget}
-                onChange={(e) => setBudget(e.target.value)}
-                placeholder="Enter budget amount"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="totalDays" className="block text-sm font-medium text-gray-700 mb-2">
-                Trip Duration (days)
-              </label>
-              <input
-                type="number"
-                id="totalDays"
-                min="1"
-                max="30"
-                value={totalDays}
-                onChange={(e) => setTotalDays(parseInt(e.target.value))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
-              />
-            </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="totalDays" className="mb-1.5 block text-sm font-medium text-canopy/80">
+              Days
+            </label>
+            <input
+              id="totalDays"
+              type="number"
+              min={1}
+              max={30}
+              value={totalDays}
+              onChange={(e) => setTotalDays(parseInt(e.target.value, 10) || 1)}
+              className="w-full rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-canopy focus:border-trail-rust focus:outline-none"
+            />
+          </div>
+          <div>
+            <label htmlFor="maxHours" className="mb-1.5 block text-sm font-medium text-canopy/80">
+              Max driving hrs/day
+            </label>
+            <input
+              id="maxHours"
+              type="number"
+              min={1}
+              max={14}
+              value={maxDrivingHoursPerDay}
+              onChange={(e) => setMaxDrivingHoursPerDay(parseInt(e.target.value, 10) || 1)}
+              className="w-full rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-canopy focus:border-trail-rust focus:outline-none"
+            />
           </div>
         </div>
 
-        {/* AI Planning Options */}
         <div>
-          <h3 className="text-lg font-medium text-gray-700 mb-3">🤖 AI-Powered Planning</h3>
-          
-          <div className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="useAI"
-                checked={useAI}
-                onChange={(e) => setUseAI(e.target.checked)}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <label htmlFor="useAI" className="text-sm text-gray-700">
-                Use AI to suggest attractions and optimize route
-              </label>
-            </div>
+          <label htmlFor="budget" className="mb-1.5 block text-sm font-medium text-canopy/80">
+            Budget (optional)
+          </label>
+          <input
+            id="budget"
+            type="number"
+            value={budget}
+            onChange={(e) => setBudget(e.target.value)}
+            placeholder="1200"
+            className="w-full rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
+          />
+        </div>
 
-            {useAI && (
-              <div>
-                <label htmlFor="aiFocus" className="block text-sm font-medium text-gray-700 mb-2">
-                  Trip Focus
-                </label>
-                <select
-                  id="aiFocus"
-                  value={aiFocus}
-                  onChange={(e) => setAiFocus(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
-                >
-                  <option value="nature">Nature & Outdoors</option>
-                  <option value="culture">Culture & History</option>
-                  <option value="adventure">Adventure & Sports</option>
-                  <option value="food">Food & Dining</option>
-                  <option value="relaxation">Relaxation & Wellness</option>
-                  <option value="mixed">Mixed Interests</option>
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  AI will prioritize attractions based on your focus
-                </p>
-              </div>
-            )}
+        <div>
+          <p className="mb-2 text-sm font-medium text-canopy/80">What&apos;s worth the detour</p>
+          <div className="grid grid-cols-2 gap-2">
+            {ATTRACTION_TYPES.map((t) => (
+              <label key={t.value} className="flex items-center gap-2 text-sm text-canopy/80">
+                <input
+                  type="checkbox"
+                  checked={attractionTypes.includes(t.value)}
+                  onChange={() => toggleAttractionType(t.value)}
+                  className="h-4 w-4 rounded border-dusk text-trail-rust focus:ring-trail-rust"
+                />
+                {t.label}
+              </label>
+            ))}
           </div>
         </div>
+
+        {error && (
+          <p className="rounded-md border border-trail-rust/40 bg-trail-rust/10 px-3 py-2 text-sm text-trail-rust">
+            {error}
+          </p>
+        )}
 
         <button
-          onClick={handlePlanTrip}
-          disabled={isLoading || !tripName || !startPoint || !endPoint}
-          className="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+          type="button"
+          onClick={handleSubmit}
+          disabled={isSubmitting || !isValid}
+          className="w-full rounded-md bg-trail-rust py-3 font-medium text-parchment transition-colors hover:bg-trail-rust/90 disabled:cursor-not-allowed disabled:bg-dusk/40"
         >
-          {isLoading ? 'Planning...' : 'Plan Multi-Stop Trip'}
+          {isSubmitting ? 'Logging route…' : 'Log this route'}
         </button>
       </div>
     </div>
   );
-} 
+}

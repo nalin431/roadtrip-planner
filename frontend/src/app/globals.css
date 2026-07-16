@@ -1,26 +1,64 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Palette — topographic map / trail log */
+  --canopy: #1f2e23; /* deep forest, primary text/dark surface */
+  --parchment: #f1ebdd; /* aged paper background */
+  --parchment-deep: #e8dfc9; /* recessed panels on parchment */
+  --trail-rust: #c1592c; /* signature accent — route lines, trail blazes */
+  --ranger: #3d5a45; /* muted mid-green, secondary surfaces */
+  --dusk: #8b7355; /* warm brown-tan, borders/dividers */
+  --ember: #e8a33d; /* ochre/gold, sparing highlight */
+
+  --background: var(--parchment);
+  --foreground: var(--canopy);
 }
 
 @theme inline {
+  --color-canopy: var(--canopy);
+  --color-parchment: var(--parchment);
+  --color-parchment-deep: var(--parchment-deep);
+  --color-trail-rust: var(--trail-rust);
+  --color-ranger: var(--ranger);
+  --color-dusk: var(--dusk);
+  --color-ember: var(--ember);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body), sans-serif;
+  background-image:
+    radial-gradient(circle at 20% 15%, rgba(139, 115, 85, 0.08) 0, transparent 45%),
+    radial-gradient(circle at 85% 60%, rgba(61, 90, 69, 0.07) 0, transparent 50%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Cg fill='none' stroke='%238b7355' stroke-opacity='0.14' stroke-width='1'%3E%3Cpath d='M0 60 Q100 20 200 60 T400 60'/%3E%3Cpath d='M0 120 Q100 80 200 120 T400 120'/%3E%3Cpath d='M0 180 Q100 140 200 180 T400 180'/%3E%3Cpath d='M0 240 Q100 200 200 240 T400 240'/%3E%3Cpath d='M0 300 Q100 260 200 300 T400 300'/%3E%3Cpath d='M0 360 Q100 320 200 360 T400 360'/%3E%3C/g%3E%3C/svg%3E");
+  background-repeat: repeat;
+  min-height: 100vh;
+}
+
+::selection {
+  background: var(--trail-rust);
+  color: var(--parchment);
+}
+
+/* Visible keyboard focus, everywhere */
+:focus-visible {
+  outline: 2px solid var(--trail-rust);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
