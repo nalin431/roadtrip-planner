@@ -25,6 +25,7 @@ export default function MapComponent({ trip }: MapComponentProps) {
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [directionsRenderer, setDirectionsRenderer] = useState<google.maps.DirectionsRenderer | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [routeError, setRouteError] = useState<string | null>(null);
 
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -85,6 +86,7 @@ export default function MapComponent({ trip }: MapComponentProps) {
     if (!map || !directionsRenderer || !trip) return;
     if (trip.waypoints.length + 2 < 2) return;
 
+    setRouteError(null);
     const directionsService = new google.maps.DirectionsService();
 
     const origin = { lat: trip.startLat, lng: trip.startLng };
@@ -105,6 +107,10 @@ export default function MapComponent({ trip }: MapComponentProps) {
       (result, status) => {
         if (status === google.maps.DirectionsStatus.OK && result) {
           directionsRenderer.setDirections(result);
+        } else {
+          setRouteError(
+            'Could not find a driving route between these stops — check the coordinates.'
+          );
         }
       }
     );
@@ -123,6 +129,11 @@ export default function MapComponent({ trip }: MapComponentProps) {
           <p className="font-mono text-xs uppercase tracking-widest text-parchment/90">
             Log your route to see it here
           </p>
+        </div>
+      )}
+      {routeError && (
+        <div className="absolute inset-x-3 top-3 rounded-md border border-trail-rust/40 bg-parchment px-3 py-2 text-sm text-trail-rust shadow-sm">
+          {routeError}
         </div>
       )}
     </div>

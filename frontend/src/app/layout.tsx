@@ -18,10 +18,25 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
 });
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "Most-Fun Path — Road Trip Planner",
   description:
     "Plan a road trip that detours for what's worth seeing, within a budget you set.",
+  openGraph: {
+    title: "Most-Fun Path — Road Trip Planner",
+    description:
+      "Plan a road trip that detours for what's worth seeing, within a budget you set.",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Most-Fun Path — Road Trip Planner",
+    description:
+      "Plan a road trip that detours for what's worth seeing, within a budget you set.",
+  },
 };
 
 export default function RootLayout({

@@ -1,130 +1,90 @@
-# 🤖 AI-Powered Road Trip Planner
+# Most-Fun Path — Road Trip Planner
 
-An intelligent road trip planning app that uses AI to create optimized itineraries with smart attraction suggestions and day-by-day planning. Built with Next.js, Tailwind CSS, OpenAI GPT-4, and Google Maps API.
+A road trip planner built around a real routing problem: given a fixed-order
+sequence of stops, how far off the direct path is it worth detouring to pick
+up something worth seeing? Next.js frontend, Python/FastAPI backend on AWS
+Lambda, Postgres via Supabase.
 
-## Features
+**Status**: the trip-logging flow (create a trip, log stops in order, see the
+direct route on a map) is fully working end-to-end. The actual Most-Fun-Path
+solver — the algorithmic centerpiece — is designed but not yet implemented;
+see `ARCHITECTURE.md` for the problem formulation and planned approach.
 
-- **🤖 AI-Powered Planning**: Intelligent trip optimization using GPT-4
-- **Smart Day Breakdown**: AI automatically breaks trips into balanced daily plans
-- **Priority Area Detection**: Identifies areas worth spending more time
-- **Attraction Suggestions**: AI recommends interesting stops based on your preferences
-- **Interactive Google Maps**: Real-time mapping with route visualization
-- **Multi-Stop Planning**: Add waypoints and optimize your route
-- **Cost Estimation**: AI provides budget estimates for your trip
-- **Accommodation Recommendations**: Smart suggestions for places to stay
+## Why this exists
 
-## Getting Started
+The earlier version of this project called an LLM from the browser to
+generate an itinerary. That's a weak engineering story — no algorithm, and
+the API key shipped to every visitor. This rebuild replaces that with a real
+optimization problem (a budgeted variant of prize-collecting insertion,
+NP-hard in general) and a proper client/server split: Next.js is a thin
+presentation layer with no direct database access, FastAPI owns all business
+logic, and nothing sensitive touches the browser.
 
-### Prerequisites
+## Stack
 
-- Node.js 18+ 
-- Google Maps API Key
-- OpenAI API Key (for AI features)
+| Layer | Choice | Why |
+|---|---|---|
+| Frontend | Next.js 15 / React 19 | Deployed to Vercel |
+| Backend | Python / FastAPI, on AWS Lambda via Mangum | Serverless fits this project's low/bursty traffic honestly, not as a cost dodge |
+| Database | Postgres via Supabase | Portable schema, no vendor lock-in beyond the connection string |
+| IaC | AWS CDK (TypeScript) | Lambda, API Gateway, Secrets Manager, billing alarm — all reviewable in this repo, not console-clicked |
+| POI data | Google Places API, server-side only, geohash-bucketed Postgres cache | Closes the key-exposure hole the old version had; avoids repeat-querying the same corridor |
 
-### Installation
+See `ARCHITECTURE.md` for the reasoning behind each of these, including the
+one genuinely tricky part of the stack (running SQLAlchemy/asyncpg against
+Supabase's transaction-mode connection pooler from Lambda).
 
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd roadtrip-planner
+## Repo layout
+
+```
+frontend/    Next.js app (presentation only)
+backend/     FastAPI app (all business logic: trips API, Places cache, the solver)
+infra/       AWS CDK stacks (Lambda, API Gateway, Secrets Manager, budget alarm)
 ```
 
-2. Install dependencies:
+## Running locally
+
+### Backend
+
 ```bash
+cd backend
+uv sync
+cp .env.example .env   # fill in DATABASE_URL, ALLOWED_ORIGIN, GOOGLE_PLACES_API_KEY
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload --port 8000
+```
+
+Needs a Postgres database — a free Supabase project works, or any local
+Postgres. `DATABASE_URL` should point at Supabase's **transaction-mode
+pooler** connection string if using Supabase (see `ARCHITECTURE.md` for why).
+
+### Frontend
+
+```bash
+cd frontend
 npm install
-```
-
-3. Set up environment variables:
-   - Create a `.env.local` file in the root directory
-   - Add your API keys:
-   ```
-   NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
-   NEXT_PUBLIC_OPENAI_API_KEY=your_openai_api_key_here
-   ```
-
-4. Get API Keys:
-   - **Google Maps API Key:**
-     - Go to [Google Cloud Console](https://console.cloud.google.com/)
-     - Create a new project or select an existing one
-     - Enable the following APIs:
-       - Maps JavaScript API
-       - Places API
-       - Directions API
-     - Create credentials (API Key)
-   - **OpenAI API Key:**
-     - Go to [OpenAI Platform](https://platform.openai.com/api-keys)
-     - Sign up or log in to your account
-     - Create a new API key
-   - Add both API keys to your `.env.local` file
-
-5. Run the development server:
-```bash
+cp .env.local.example .env.local   # fill in NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 npm run dev
 ```
 
-6. Open [http://localhost:3000](http://localhost:3000) in your browser
+Open [http://localhost:3000](http://localhost:3000). The frontend expects the
+backend running at `http://localhost:8000` by default
+(`NEXT_PUBLIC_API_BASE_URL`).
 
-## Usage
+### Tests
 
-1. **Enter Trip Details**: 
-   - Input your starting point and destination
-   - Set trip duration and preferences
-   - Enable AI-powered planning
-   - Click "Plan Multi-Stop Trip"
-
-2. **Generate AI Plan**: 
-   - Click "Generate AI-Optimized Trip Plan"
-   - AI will create a detailed day-by-day itinerary
-   - View suggested attractions and priority areas
-
-3. **Explore Your Trip**: 
-   - View the optimized route on the map
-   - See daily breakdowns with attractions
-   - Check accommodation recommendations
-   - Review cost estimates
-
-## Tech Stack
-
-- **Frontend**: Next.js 15, React 18, TypeScript
-- **Styling**: Tailwind CSS
-- **AI**: OpenAI GPT-4 API
-- **Maps**: Google Maps JavaScript API
-- **POIs**: Google Places API
-
-## Project Structure
-
-```
-src/
-├── app/
-│   ├── page.tsx          # Main page component
-│   ├── layout.tsx        # Root layout
-│   └── globals.css       # Global styles
-└── components/
-    ├── MapComponent.tsx   # Google Maps integration
-    ├── TripForm.tsx      # Trip input form
-    └── TripInfo.tsx      # Route information display
+```bash
+cd backend && uv run pytest
+cd frontend && npx tsc --noEmit && npm run lint
+cd infra && npm test
 ```
 
-## Environment Variables
+## Deployment
 
-Create a `.env.local` file with:
-
-```env
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
-NEXT_PUBLIC_OPENAI_API_KEY=your_openai_api_key_here
-```
-
-## AI Setup
-
-For detailed AI setup instructions, see [AI_SETUP.md](AI_SETUP.md).
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+Not yet live — `infra/README.md` has the full CDK deploy walkthrough once an
+AWS account and Docker are available. Frontend deploys to Vercel; backend
+deploys as a Lambda function behind an API Gateway HTTP API.
 
 ## License
 
-This project is open source and available under the [MIT License](LICENSE).
+MIT.
