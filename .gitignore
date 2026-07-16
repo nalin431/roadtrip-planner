@@ -17,12 +17,16 @@ frontend/*.tsbuildinfo
 frontend/next-env.d.ts
 frontend/.vercel
 
-# --- backend (Go) ---
-backend/tmp/
-backend/bin/
-backend/*.exe
-backend/*.test
-backend/coverage.out
+# --- backend (Python/FastAPI) ---
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.egg-info/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/.coverage
+backend/htmlcov/
 
 # --- infra (CDK) ---
 infra/node_modules
