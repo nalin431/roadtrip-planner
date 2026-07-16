@@ -7,10 +7,10 @@ import (
 )
 
 type Config struct {
-	Env            string // "local" | "lambda"
-	Port           string // local server only
-	DatabaseURL    string
-	AllowedOrigin  string
+	Env             string // "local" | "lambda"
+	Port            string // local server only
+	DatabaseURL     string
+	AllowedOrigin   string
 	GooglePlacesKey string
 }
 
