@@ -36,3 +36,24 @@ jobs:
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm run build
+
+  infra:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: infra/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      # cdk synth needs Docker (PythonFunction bundles backend/ via a
+      # Docker-based pip install) and real AWS credentials for context
+      # lookups, neither of which this job has -- so CI only covers
+      # compile + the Docker-free unit tests, same as local dev without
+      # Docker running. Full synth/deploy is exercised manually.
+      - run: npm test
