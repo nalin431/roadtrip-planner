@@ -36,8 +36,10 @@ infra/*.js
 !infra/jest.config.js
 
 # --- misc ---
+.worktrees/
 .DS_Store
 *.pem
+CLAUDE.local.md
 
 # debug
 npm-debug.log*
