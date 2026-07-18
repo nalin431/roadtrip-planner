@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { Trip, Waypoint } from '@/types/trip';
 import { apiClient, ApiRequestError } from '@/lib/apiClient';
 import DetourDial from './DetourDial';
+import LocationAutocomplete from './LocationAutocomplete';
 
 interface TripFormProps {
   onTripCreated: (trip: Trip) => void;
@@ -18,10 +19,9 @@ const ATTRACTION_TYPES = [
   { value: 'cafe', label: 'Coffee & Cafes' },
 ];
 
-// Trip form doesn't yet geocode free-text locations into coordinates — that
-// requires the Places Geocoding API. For now, start/end/waypoint coordinates
-// are entered directly. Geocoding-on-submit is a natural Phase 5 follow-up
-// once the algorithm consumes these coordinates for real.
+// Start/end/waypoint coordinates are resolved via Google Places Autocomplete
+// (LocationAutocomplete) rather than manual entry — selecting a suggestion
+// atomically sets both the location name and lat/lng.
 export default function TripForm({ onTripCreated }: TripFormProps) {
   const [name, setName] = useState('');
   const [startLocation, setStartLocation] = useState('');
@@ -32,7 +32,9 @@ export default function TripForm({ onTripCreated }: TripFormProps) {
   const [endLng, setEndLng] = useState('');
   const [isReturnTrip, setIsReturnTrip] = useState(false);
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
-  const [waypointDraft, setWaypointDraft] = useState({ location: '', lat: '', lng: '' });
+  const [waypointDraft, setWaypointDraft] = useState<{ location: string; lat: number; lng: number } | null>(
+    null
+  );
   const [totalDays, setTotalDays] = useState(5);
   const [maxDrivingHoursPerDay, setMaxDrivingHoursPerDay] = useState(6);
   const [detourBudgetPct, setDetourBudgetPct] = useState(10);
@@ -48,11 +50,9 @@ export default function TripForm({ onTripCreated }: TripFormProps) {
   };
 
   const addWaypoint = () => {
-    const lat = parseFloat(waypointDraft.lat);
-    const lng = parseFloat(waypointDraft.lng);
-    if (!waypointDraft.location.trim() || Number.isNaN(lat) || Number.isNaN(lng)) return;
-    setWaypoints((prev) => [...prev, { location: waypointDraft.location, lat, lng }]);
-    setWaypointDraft({ location: '', lat: '', lng: '' });
+    if (!waypointDraft) return;
+    setWaypoints((prev) => [...prev, waypointDraft]);
+    setWaypointDraft(null);
   };
 
   const removeWaypoint = (index: number) => {
@@ -135,63 +135,29 @@ export default function TripForm({ onTripCreated }: TripFormProps) {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <fieldset className="space-y-2 rounded-md border border-dusk/30 p-3">
             <legend className="px-1 font-mono text-xs uppercase tracking-widest text-ranger">Start</legend>
-            <input
-              type="text"
-              value={startLocation}
-              onChange={(e) => setStartLocation(e.target.value)}
-              placeholder="Name (e.g. San Francisco, CA)"
-              className="w-full rounded-md border border-dusk/40 bg-parchment px-3 py-2 text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
+            <LocationAutocomplete
+              id="startLocation"
+              placeholder="Search a starting point"
+              onPlaceSelected={(name, lat, lng) => {
+                setStartLocation(name);
+                setStartLat(String(lat));
+                setStartLng(String(lng));
+              }}
             />
-            <div className="flex gap-2">
-              <input
-                type="text"
-                inputMode="decimal"
-                value={startLat}
-                onChange={(e) => setStartLat(e.target.value)}
-                placeholder="Lat"
-                className="w-1/2 rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
-              />
-              <input
-                type="text"
-                inputMode="decimal"
-                value={startLng}
-                onChange={(e) => setStartLng(e.target.value)}
-                placeholder="Lng"
-                className="w-1/2 rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
-              />
-            </div>
           </fieldset>
 
           <fieldset className="space-y-2 rounded-md border border-dusk/30 p-3">
             <legend className="px-1 font-mono text-xs uppercase tracking-widest text-ranger">End</legend>
-            <input
-              type="text"
-              value={endLocation}
-              onChange={(e) => setEndLocation(e.target.value)}
-              placeholder="Name (e.g. Seattle, WA)"
+            <LocationAutocomplete
+              id="endLocation"
+              placeholder="Search a destination"
               disabled={isReturnTrip}
-              className="w-full rounded-md border border-dusk/40 bg-parchment px-3 py-2 text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none disabled:opacity-50"
+              onPlaceSelected={(name, lat, lng) => {
+                setEndLocation(name);
+                setEndLat(String(lat));
+                setEndLng(String(lng));
+              }}
             />
-            <div className="flex gap-2">
-              <input
-                type="text"
-                inputMode="decimal"
-                value={endLat}
-                onChange={(e) => setEndLat(e.target.value)}
-                placeholder="Lat"
-                disabled={isReturnTrip}
-                className="w-1/2 rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none disabled:opacity-50"
-              />
-              <input
-                type="text"
-                inputMode="decimal"
-                value={endLng}
-                onChange={(e) => setEndLng(e.target.value)}
-                placeholder="Lng"
-                disabled={isReturnTrip}
-                className="w-1/2 rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none disabled:opacity-50"
-              />
-            </div>
           </fieldset>
         </div>
 
@@ -259,34 +225,19 @@ export default function TripForm({ onTripCreated }: TripFormProps) {
             ))}
           </ol>
 
-          <div className="mt-3 flex flex-wrap gap-2">
-            <input
-              type="text"
-              value={waypointDraft.location}
-              onChange={(e) => setWaypointDraft((d) => ({ ...d, location: e.target.value }))}
-              placeholder="Stop name"
-              className="min-w-[10rem] flex-1 rounded-md border border-dusk/40 bg-parchment px-3 py-2 text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              value={waypointDraft.lat}
-              onChange={(e) => setWaypointDraft((d) => ({ ...d, lat: e.target.value }))}
-              placeholder="Lat"
-              className="w-20 rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              value={waypointDraft.lng}
-              onChange={(e) => setWaypointDraft((d) => ({ ...d, lng: e.target.value }))}
-              placeholder="Lng"
-              className="w-20 rounded-md border border-dusk/40 bg-parchment px-3 py-2 font-mono text-sm text-canopy placeholder:text-canopy/40 focus:border-trail-rust focus:outline-none"
-            />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="min-w-[10rem] flex-1">
+              <LocationAutocomplete
+                id="waypointDraft"
+                placeholder="Search a stop"
+                onPlaceSelected={(name, lat, lng) => setWaypointDraft({ location: name, lat, lng })}
+              />
+            </div>
             <button
               type="button"
               onClick={addWaypoint}
-              className="rounded-md bg-ranger px-4 py-2 text-sm font-medium text-parchment transition-colors hover:bg-ranger/90"
+              disabled={!waypointDraft}
+              className="rounded-md bg-ranger px-4 py-2 text-sm font-medium text-parchment transition-colors hover:bg-ranger/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Add stop
             </button>
