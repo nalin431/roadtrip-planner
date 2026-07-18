@@ -172,6 +172,33 @@ def test_split_into_days_caps_at_total_days() -> None:
     assert len(days) <= 2
 
 
+def test_split_into_days_boundary_point_not_duplicated_across_days() -> None:
+    # 5-point route, forced to split at every leg (tiny hourly cap, plenty of
+    # days available) -- each boundary point must appear in exactly one day,
+    # not as the last stop of day N *and* the first stop of day N+1.
+    route = [Point(lat=0.0, lng=float(i)) for i in range(5)]
+    result = MfpResult(
+        stop_sequence=route,
+        selected_stops=[],
+        total_fun_score=0.0,
+        total_distance_m=0.0,
+        total_duration_s=0.0,
+        detour_used_pct=0.0,
+        unassigned_candidate_count=0,
+        solve_time_ms=0,
+    )
+    days = split_into_days(result, total_days=5, max_driving_hours_per_day=0.1)
+
+    assert len(days) > 1
+
+    all_points = [point for day in days for point in day]
+    assert len(all_points) == len(route)
+    assert all_points == route
+
+    for prev_day, next_day in zip(days, days[1:], strict=False):
+        assert prev_day[-1] != next_day[0]
+
+
 def test_solve_completes_within_time_budget() -> None:
     import time
 

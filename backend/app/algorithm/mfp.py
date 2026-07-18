@@ -174,7 +174,7 @@ def split_into_days(
     for i in range(1, len(route)):
         leg_seconds = duration_s(distance_m(route[i - 1], route[i]))
         if day_seconds + leg_seconds > max_seconds_per_day and len(days) < total_days:
-            days.append([route[i - 1]])
+            days.append([])
             day_seconds = 0.0
         days[-1].append(route[i])
         day_seconds += leg_seconds
