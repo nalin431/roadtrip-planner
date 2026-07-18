@@ -78,28 +78,30 @@ In production these are meant to come from AWS Secrets Manager (`infra/lib/secre
 
 The backend (`backend/app/`) is a normal FastAPI app (`app/main.py`) with `CORSMiddleware` configured for an explicit `allowed_origin` (never `*`, required for the `SameSite=None; Secure` session cookie to work cross-origin). `app/lambda_handler.py` is `Mangum(app)` — the Lambda entrypoint; the FastAPI app itself has zero Lambda-specific code, so `uvicorn app.main:app` works identically for local dev.
 
-Current endpoints (`app/api/trips.py`, `app/api/healthz.py`):
+Current endpoints (`app/api/trips.py`, `app/api/plan.py`, `app/api/healthz.py`):
 ```
-POST   /api/trips          # create trip
-GET    /api/trips/{id}     # fetch trip
-PATCH  /api/trips/{id}      # update trip metadata/prefs
-GET    /api/healthz         # liveness check
+POST   /api/trips               # create trip
+GET    /api/trips/{id}          # fetch trip
+PATCH  /api/trips/{id}          # update trip metadata/prefs
+POST   /api/trips/{id}/plan     # run the MFP solver, persist + return a trip_plans row
+GET    /api/trips/{id}/plan     # fetch the most recent computed plan
+GET    /api/healthz             # liveness check
 ```
-`POST/GET /api/trips/{id}/plan` (run the solver, fetch computed plan) is planned but not yet built — it depends on `app/algorithm/mfp.py`, which is unimplemented (see below).
+`POST /api/trips/{id}/plan` loads the trip + waypoints, gathers candidate POIs via `PlacesCache.get_candidates_along_route()` (new method — queries the existing read-through cache around the midpoint of each route leg, deduped by `google_place_id`), builds an `MfpInput`, calls `solve()` + `split_into_days()`, and persists the result as a `TripPlan` row. `GET` just fetches the latest `TripPlan` for a trip. Verified manually end-to-end against live Supabase + live Google Places (see git history/session notes around this change) — trip create → `/plan` → real detour stop inserted within budget → `GET /plan` returns the persisted result.
 
-### The Most-Fun Path algorithm — NOT YET IMPLEMENTED
+### The Most-Fun Path algorithm — IMPLEMENTED and wired to `/plan`
 
-`backend/app/algorithm/mfp.py` has the full problem statement and planned approach in its module docstring, real type signatures (`solve(input: MfpInput, max_solve_time_ms: int = 3000) -> MfpResult`, `split_into_days(...)`), but both functions are `raise NotImplementedError` stubs. This is the actual centerpiece of the project and the main piece of unfinished work — see "What's not done yet."
+`backend/app/algorithm/mfp.py` implements `solve(input: MfpInput, max_solve_time_ms: int = 3000) -> MfpResult` and `split_into_days(result, total_days, max_driving_hours_per_day) -> list[list[Point]]`. Scope decision made explicitly: **greedy heuristic, not an exact solver** — the candidate-count and Lambda-timeout realities make exponential/exact approaches (ILP, bitmask DP) not worth the complexity here; see `ARCHITECTURE.md` for the full reasoning.
 
-Planned shape once built: fixed waypoint order (no reordering), shortest-path baseline via a routing API, greedy insertion of nearby POIs ranked by `fun_score / Δdistance` until a detour budget (`trip.detour_budget_pct`, default 10%, adjustable via `DetourDial.tsx` in the frontend) is exhausted, optional bounded 2-opt refinement, then a separate day-splitting post-process. `app/algorithm` is deliberately pure Python with zero HTTP/DB dependencies for easy unit testing (the one place tests exist despite testing being otherwise deferred).
+Shape: fixed waypoint order (no reordering), shortest-path baseline computed via haversine distance (`app/algorithm/geo.py` — there's no cached routing/Directions API yet, see gap #7 below), then greedy insertion: for each remaining candidate POI, find its cheapest insertion edge in the current route (`Δdistance = dist(prev,poi) + dist(poi,next) - dist(prev,next)`), rank by `fun_score / Δdistance`, insert the best-ranked one that still fits the remaining detour budget (`trip.detour_budget_pct`, default 10%, adjustable via `DetourDial.tsx` in the frontend), repeat — recomputing every candidate's best edge each iteration since the route shape changes. Followed by a wall-clock-bounded 2-opt cleanup pass (bounded by `max_solve_time_ms`), then `split_into_days()` as a separate, simpler post-process. `app/algorithm` is deliberately pure Python with zero HTTP/DB dependencies for easy unit testing (the one place tests exist despite testing being otherwise deferred) — `app/algorithm/tests/test_mfp.py`, 11 table-driven cases covering budget-never-exceeded, value-over-cost ranking, waypoint-order preservation, day-splitting, and a 150-candidate timing check. Duration estimates use a flat average-speed constant in `geo.py` pending real routing data.
 
-### POI caching (built and working)
+### POI caching (built, working, and wired to `/plan`)
 
-`backend/app/places/` — `client.py` (server-side `httpx` client for Google Places, key never reaches the browser), `geohash.py` (5km geocell bucketing), `cache.py` (read-through cache against `pois`/`poi_cache_queries` tables, TTL 30 days), `score.py` (`fun_score = 0.6·normalize(rating) + 0.3·normalize(log(review_count)) + 0.1·categoryBoost(category)`). Has unit tests (`app/places/tests/test_geohash.py`). Not yet wired to any endpoint — nothing calls `cache.py` from `app/api/` yet, since that wiring is part of the unbuilt `/plan` endpoint.
+`backend/app/places/` — `client.py` (server-side `httpx` client for Google Places, key never reaches the browser), `geohash.py` (5km geocell bucketing), `cache.py` (read-through cache against `pois`/`poi_cache_queries` tables, TTL 30 days, plus `get_candidates_along_route()` for gathering candidates over a whole fixed route), `score.py` (`fun_score = 0.6·normalize(rating) + 0.3·normalize(log(review_count)) + 0.1·categoryBoost(category)`), `deps.py` (new — `get_places_cache()`, an `lru_cache`d singleton `PlacesCache`/`PlacesClient` FastAPI dependency, mirroring the DB engine's module-level lifecycle). Has unit tests (`app/places/tests/test_geohash.py`). Now called from `app/api/plan.py`.
 
 ### Database (Supabase Postgres, SQLAlchemy + Alembic)
 
-Five tables — `sessions`, `trips`, `trip_waypoints`, `pois`, `poi_cache_queries`, plus `trip_plans` (migration exists but no code writes to it yet, since the solver that would populate it isn't built). Models in `backend/app/db/models.py`, one baseline Alembic migration in `app/db/migrations/versions/`. Full schema and design rationale in `ARCHITECTURE.md`.
+Five tables — `sessions`, `trips`, `trip_waypoints`, `pois`, `poi_cache_queries`, plus `trip_plans` (in the baseline migration; now actively written to by `POST /api/trips/{id}/plan`). Models in `backend/app/db/models.py`, one baseline Alembic migration in `app/db/migrations/versions/`. Full schema and design rationale in `ARCHITECTURE.md`.
 
 **Lambda + pgbouncer gotcha**: `DATABASE_URL` must point at Supabase's transaction-mode pooler (port 6543) with `connect_args={"statement_cache_size": 0}` in `app/db/session.py` (pgbouncer transaction mode doesn't support asyncpg's server-side prepared statement cache across pooled connections). Migrations use `DATABASE_URL_MIGRATE`, the session-mode pooler (port 5432), since Alembic needs a persistent session. Full explanation in `ARCHITECTURE.md`.
 
@@ -107,15 +109,15 @@ Five tables — `sessions`, `trips`, `trip_waypoints`, `pois`, `poi_cache_querie
 
 `TripForm.tsx` (form + `DetourDial.tsx` for the detour-budget-% slider, calls `apiClient.createTrip`), `MapComponent.tsx` (uses `@googlemaps/js-api-loader`'s `importLibrary`/`setOptions` API and real `@types/google.maps` typing — no manual `<script>` injection, no `any`-typed globals), `TripSummary.tsx`. All components are `'use client'`, path alias `@/*` → `src/*`.
 
-Since the `/plan` endpoint doesn't exist yet, the frontend currently only exercises trip create/fetch/update — there's no day-by-day itinerary rendering wired up yet because there's no solver output to render.
+The `/plan` endpoint now exists and works (see above), but the frontend hasn't been rewired to call it yet — `apiClient.ts`/`TripSummary.tsx`/`MapComponent.tsx` still only exercise trip create/fetch/update, so there's no day-by-day itinerary rendering wired up yet even though the backend can now produce one. This is the next real gap to close (see "What's not done yet" #2).
 
 ## What's not done yet (relative to the build plan)
 
 This is the main gap between the original plan and current state — check here before assuming something is finished:
 
-1. **The MFP algorithm itself** (`app/algorithm/mfp.py`) — stubbed, `raise NotImplementedError`. This is the next real piece of work.
-2. **`POST/GET /api/trips/{id}/plan` endpoints** — don't exist yet; blocked on the algorithm.
-3. **Places cache is not wired to any endpoint** — `app/places/cache.py` works and is tested in isolation, but nothing in `app/api/` calls it yet.
+1. ~~The MFP algorithm itself~~ — **done**, see `app/algorithm/mfp.py` above.
+2. ~~`POST/GET /api/trips/{id}/plan` endpoints~~ — **done**, see `app/api/plan.py` above; verified manually against live Supabase + Places. **The next real piece of work is rewiring the frontend** (`apiClient.ts`, `TripSummary.tsx`, `MapComponent.tsx`) to call `/plan` and render `dayPlans` instead of a static trip.
+3. ~~Places cache is not wired to any endpoint~~ — **done**, called from `app/api/plan.py` via `get_candidates_along_route()`.
 4. **AWS is not actually deployed.** CDK stacks (`infra/lib/*.ts`) are written and have unit tests (`infra/test/stacks.test.ts`, checked via `cdk synth`-style assertions), but `cdk deploy` has not been run against a real AWS account — no live Lambda, no live API Gateway, no Secrets Manager values set. Locally the backend runs via `uvicorn` against `.env`, not against deployed infra.
 5. **Frontend is not deployed to Vercel** — runs locally against `localhost:8000` only.
 6. **Per-session/IP daily Places quota** (mentioned in the plan as a cost-control measure) — not implemented, moot until the `/plan` endpoint exists to trigger Places calls.

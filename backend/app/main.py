@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import healthz, trips
+from app.api import healthz, plan, trips
 from app.core.config import settings
 from app.core.logging import configure_logging
 
@@ -22,6 +22,7 @@ app.add_middleware(
 
 app.include_router(healthz.router)
 app.include_router(trips.router)
+app.include_router(plan.router)
 
 
 @app.middleware("http")

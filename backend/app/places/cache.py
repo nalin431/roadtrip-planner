@@ -15,9 +15,41 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TTL = timedelta(days=30)
 
 
+_DEFAULT_CATEGORY = "tourist_attraction"
+_LEG_SEARCH_RADIUS_M = 25_000
+
+
 class PlacesCache:
     def __init__(self, client: PlacesClient) -> None:
         self._client = client
+
+    async def get_candidates_along_route(
+        self, db: AsyncSession, stops: list[tuple[float, float]], categories: list[str]
+    ) -> list[Poi]:
+        """Gathers candidate POIs for a fixed route by querying around the
+        midpoint of each leg (consecutive pair of stops), for each requested
+        category, and deduping by google_place_id. Falls back to a single
+        default category if the trip specified none.
+
+        This reuses get_candidates' existing read-through cache rather than
+        introducing separate corridor/buffer geometry -- simple, and
+        consistent with the geocell-bucketed caching already in place.
+        """
+        wanted_categories = categories or [_DEFAULT_CATEGORY]
+
+        seen_ids: set[str] = set()
+        candidates: list[Poi] = []
+        for (lat1, lng1), (lat2, lng2) in zip(stops, stops[1:], strict=False):
+            mid_lat = (lat1 + lat2) / 2
+            mid_lng = (lng1 + lng2) / 2
+            for category in wanted_categories:
+                pois = await self.get_candidates(db, mid_lat, mid_lng, _LEG_SEARCH_RADIUS_M, category)
+                for poi in pois:
+                    if poi.google_place_id not in seen_ids:
+                        seen_ids.add(poi.google_place_id)
+                        candidates.append(poi)
+
+        return candidates
 
     async def get_candidates(
         self, db: AsyncSession, lat: float, lng: float, radius_m: int, category: str
