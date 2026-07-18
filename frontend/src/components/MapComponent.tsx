@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
-import type { Trip } from '@/types/trip';
+import type { Trip, TripPlan } from '@/types/trip';
 
 interface MapComponentProps {
   trip: Trip | null;
+  plan: TripPlan | null;
 }
 
 // Muted, parchment-toned map styling so the Google basemap doesn't clash
@@ -20,12 +21,13 @@ const MAP_STYLE: google.maps.MapTypeStyle[] = [
   { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#dcd3ba' }] },
 ];
 
-export default function MapComponent({ trip }: MapComponentProps) {
+export default function MapComponent({ trip, plan }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [directionsRenderer, setDirectionsRenderer] = useState<google.maps.DirectionsRenderer | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+  const poiMarkersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
 
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -87,12 +89,30 @@ export default function MapComponent({ trip }: MapComponentProps) {
     if (trip.waypoints.length + 2 < 2) return;
 
     setRouteError(null);
+
+    // Clear any POI markers from a previous render before drawing the new route.
+    poiMarkersRef.current.forEach((marker) => {
+      marker.map = null;
+    });
+    poiMarkersRef.current = [];
+
     const directionsService = new google.maps.DirectionsService();
 
     const origin = { lat: trip.startLat, lng: trip.startLng };
     const destination = { lat: trip.endLat, lng: trip.endLng };
-    const waypoints: google.maps.DirectionsWaypoint[] = trip.waypoints.map((wp) => ({
-      location: { lat: wp.lat, lng: wp.lng },
+
+    const allStops = plan
+      ? plan.dayPlans.flatMap((day) => day.stops)
+      : trip.waypoints.map((wp) => ({ lat: wp.lat, lng: wp.lng, name: null, category: null, funScore: null }));
+
+    // When a plan exists, allStops includes the route's start/end points too
+    // (MfpResult.stop_sequence always starts/ends with them) — drop the
+    // first/last entries so they aren't passed as waypoints on top of
+    // origin/destination.
+    const middleStops = plan ? allStops.slice(1, -1) : allStops;
+
+    const waypoints: google.maps.DirectionsWaypoint[] = middleStops.map((stop) => ({
+      location: { lat: stop.lat, lng: stop.lng },
       stopover: true,
     }));
 
@@ -104,9 +124,25 @@ export default function MapComponent({ trip }: MapComponentProps) {
         optimizeWaypoints: false, // fixed order — the whole premise of Most-Fun Path
         travelMode: google.maps.TravelMode.DRIVING,
       },
-      (result, status) => {
+      async (result, status) => {
         if (status === google.maps.DirectionsStatus.OK && result) {
           directionsRenderer.setDirections(result);
+
+          if (plan) {
+            const { AdvancedMarkerElement, PinElement } = (await google.maps.importLibrary(
+              'marker'
+            )) as google.maps.MarkerLibrary;
+            const poiStops = middleStops.filter((s) => s.name);
+            poiMarkersRef.current = poiStops.map((stop) => {
+              const pin = new PinElement({ background: '#c1592c', borderColor: '#1f2e23' });
+              return new AdvancedMarkerElement({
+                map,
+                position: { lat: stop.lat, lng: stop.lng },
+                title: stop.name ?? undefined,
+                content: pin.element,
+              });
+            });
+          }
         } else {
           setRouteError(
             'Could not find a driving route between these stops — check the coordinates.'
@@ -114,7 +150,7 @@ export default function MapComponent({ trip }: MapComponentProps) {
         }
       }
     );
-  }, [map, directionsRenderer, trip]);
+  }, [map, directionsRenderer, trip, plan]);
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-lg border border-dusk/30">
