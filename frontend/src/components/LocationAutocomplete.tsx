@@ -55,9 +55,22 @@ export default function LocationAutocomplete({
       elementRef.current = element;
       currentElement = element;
 
-      handleSelect = ((event: google.maps.places.PlaceAutocompletePlaceSelectEvent) => {
+      // `PlaceAutocompletePlaceSelectEvent`/`event.place` in `@types/google.maps`
+      // describe the beta channel only (see the class's JSDoc). This app loads
+      // the stable `v=weekly` runtime via setOptions above, whose actual
+      // `gmp-select` event instead carries `event.placePrediction` (a
+      // `PlacePrediction`, per Google's documented stable-channel pattern:
+      // https://developers.google.com/maps/documentation/javascript/place-autocomplete-new).
+      // `PlacePrediction.toPlace()` converts it to the `Place` we then call
+      // `fetchFields` on. Typed as a bare `Event` with a cast below since no
+      // exported type in this @types version models the stable event shape.
+      handleSelect = ((event: Event) => {
         void (async () => {
-          const place = event.place;
+          const { placePrediction } = event as unknown as {
+            placePrediction: google.maps.places.PlacePrediction | null;
+          };
+          if (!placePrediction) return;
+          const place = placePrediction.toPlace();
           await place.fetchFields({ fields: ['displayName', 'location'] });
           if (!place.location) return;
           onPlaceSelected(
