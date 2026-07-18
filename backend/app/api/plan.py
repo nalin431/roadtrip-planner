@@ -23,8 +23,11 @@ ALGORITHM_VERSION = "mfp-greedy-v1"
 class PointOut(BaseModel):
     lat: float
     lng: float
+    name: str | None = None
+    category: str | None = None
+    fun_score: float | None = Field(default=None, serialization_alias="funScore")
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class DayPlanOut(BaseModel):
@@ -107,6 +110,22 @@ async def create_plan(
     result = solve(mfp_input)
     days = split_into_days(result, trip.total_days, float(trip.max_driving_hours_per_day))
 
+    poi_by_point: dict[tuple[float, float], Candidate] = {
+        (s.candidate.point.lat, s.candidate.point.lng): s.candidate for s in result.selected_stops
+    }
+
+    def _point_to_dict(p: Point) -> dict[str, str | float | None]:
+        poi = poi_by_point.get((p.lat, p.lng))
+        if poi is None:
+            return {"lat": p.lat, "lng": p.lng, "name": None, "category": None, "fun_score": None}
+        return {
+            "lat": p.lat,
+            "lng": p.lng,
+            "name": poi.name,
+            "category": poi.category,
+            "fun_score": poi.fun_score,
+        }
+
     plan = TripPlan(
         trip_id=trip.id,
         algorithm_version=ALGORITHM_VERSION,
@@ -114,7 +133,7 @@ async def create_plan(
         total_distance_m=result.total_distance_m,
         total_duration_s=result.total_duration_s,
         solve_time_ms=result.solve_time_ms,
-        day_plans_json=[[{"lat": p.lat, "lng": p.lng} for p in day] for day in days],
+        day_plans_json=[[_point_to_dict(p) for p in day] for day in days],
     )
     db.add(plan)
     await db.commit()
