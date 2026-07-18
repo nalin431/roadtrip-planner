@@ -59,3 +59,27 @@ export interface ApiError {
   error: string;
   code: string;
 }
+
+export interface PlanStop {
+  lat: number;
+  lng: number;
+  name: string | null;
+  category: string | null;
+  funScore: number | null;
+}
+
+export interface DayPlan {
+  stops: PlanStop[];
+}
+
+export interface TripPlan {
+  id: string;
+  tripId: string;
+  algorithmVersion: string;
+  dayPlans: DayPlan[];
+  totalFunScore: number;
+  totalDistanceM: number;
+  totalDurationS: number;
+  solveTimeMs: number;
+  createdAt: string;
+}

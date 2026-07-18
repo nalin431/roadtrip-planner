@@ -1,4 +1,4 @@
-import type { ApiError, CreateTripInput, Trip, UpdateTripInput } from "@/types/trip";
+import type { ApiError, CreateTripInput, Trip, TripPlan, UpdateTripInput } from "@/types/trip";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -57,6 +57,12 @@ export const apiClient = {
     return request<Trip>(`/api/trips/${id}`, {
       method: "PATCH",
       body: JSON.stringify(input),
+    });
+  },
+
+  createPlan(tripId: string): Promise<TripPlan> {
+    return request<TripPlan>(`/api/trips/${tripId}/plan`, {
+      method: "POST",
     });
   },
 };
