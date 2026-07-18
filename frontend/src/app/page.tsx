@@ -4,10 +4,16 @@ import { useState } from 'react';
 import MapComponent from '@/components/MapComponent';
 import TripForm from '@/components/TripForm';
 import TripSummary from '@/components/TripSummary';
-import type { Trip } from '@/types/trip';
+import type { Trip, TripPlan } from '@/types/trip';
 
 export default function Home() {
   const [trip, setTrip] = useState<Trip | null>(null);
+  const [plan, setPlan] = useState<TripPlan | null>(null);
+
+  const handleTripCreated = (newTrip: Trip) => {
+    setTrip(newTrip);
+    setPlan(null);
+  };
 
   return (
     <main className="min-h-screen">
@@ -29,14 +35,14 @@ export default function Home() {
       <div className="mx-auto max-w-6xl px-4 py-10 sm:px-8">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
           <div className="lg:col-span-2">
-            <TripForm onTripCreated={setTrip} />
+            <TripForm onTripCreated={handleTripCreated} />
           </div>
 
           <div className="space-y-6 lg:col-span-3">
             <div className="h-[420px]">
-              <MapComponent trip={trip} />
+              <MapComponent trip={trip} plan={plan} />
             </div>
-            {trip && <TripSummary trip={trip} />}
+            {trip && <TripSummary trip={trip} plan={plan} onPlanCreated={setPlan} />}
           </div>
         </div>
       </div>
