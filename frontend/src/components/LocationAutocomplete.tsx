@@ -100,7 +100,7 @@ export default function LocationAutocomplete({
     <div
       ref={containerRef}
       data-disabled={disabled}
-      className="w-full [&>*]:w-full [&>*]:rounded-md [&>*]:border [&>*]:border-dusk/40 [&>*]:bg-parchment [&>*]:px-3 [&>*]:py-2 [&>*]:text-sm [&>*]:text-canopy"
+      className="w-full min-w-0 [&>*]:block [&>*]:w-full [&>*]:min-w-0 [&>*]:max-w-full [&>*]:rounded-md [&>*]:border [&>*]:border-dusk/40 [&>*]:bg-parchment [&>*]:px-3 [&>*]:py-2 [&>*]:text-sm [&>*]:text-canopy"
     />
   );
 }

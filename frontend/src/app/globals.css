@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: light;
+
   /* Palette — topographic map / trail log */
   --canopy: #1f2e23; /* deep forest, primary text/dark surface */
   --parchment: #f1ebdd; /* aged paper background */
@@ -12,6 +14,15 @@
 
   --background: var(--parchment);
   --foreground: var(--canopy);
+}
+
+/* Google's Place Autocomplete web component renders its suggestion
+   dropdown in a closed shadow root that reads the OS/browser dark-mode
+   preference independently of this page's own theming. Setting
+   color-scheme directly on the host (not just :root) is what actually
+   reaches in and forces its internals to light. */
+gmp-place-autocomplete {
+  color-scheme: light !important;
 }
 
 @theme inline {

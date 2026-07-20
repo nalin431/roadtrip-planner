@@ -133,7 +133,7 @@ export default function TripForm({ onTripCreated }: TripFormProps) {
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <fieldset className="space-y-2 rounded-md border border-dusk/30 p-3">
+          <fieldset className="min-w-0 space-y-2 rounded-md border border-dusk/30 p-3">
             <legend className="px-1 font-mono text-xs uppercase tracking-widest text-ranger">Start</legend>
             <LocationAutocomplete
               id="startLocation"
@@ -146,7 +146,7 @@ export default function TripForm({ onTripCreated }: TripFormProps) {
             />
           </fieldset>
 
-          <fieldset className="space-y-2 rounded-md border border-dusk/30 p-3">
+          <fieldset className="min-w-0 space-y-2 rounded-md border border-dusk/30 p-3">
             <legend className="px-1 font-mono text-xs uppercase tracking-widest text-ranger">End</legend>
             <LocationAutocomplete
               id="endLocation"

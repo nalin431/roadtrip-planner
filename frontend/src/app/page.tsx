@@ -33,8 +33,8 @@ export default function Home() {
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-10 sm:px-8">
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-          <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-7">
+          <div className="lg:col-span-4">
             <TripForm onTripCreated={handleTripCreated} />
           </div>
 
