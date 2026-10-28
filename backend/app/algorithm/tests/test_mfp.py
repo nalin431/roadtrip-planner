@@ -213,7 +213,7 @@ def test_solve_completes_within_time_budget() -> None:
         for i in range(150)
     ]
     start = time.monotonic()
-    result = solve(make_input(candidates=candidates, detour_budget_pct=15.0), max_solve_time_ms=3000)
+    result = solve(make_input(candidates=candidates, detour_budget_pct=15.0))
     elapsed_ms = (time.monotonic() - start) * 1000
 
     assert elapsed_ms < 5000

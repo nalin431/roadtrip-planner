@@ -21,10 +21,7 @@ Approach:
      iteration recomputes cheapest-insertion cost against the *current*
      route, since inserting a stop changes the edges available to later
      candidates.
-  3. Optional bounded 2-opt: wall-clock-limited local search that reverses
-     sub-segments of the resulting route to shed wasted distance, freeing
-     leftover budget for another greedy pass.
-  4. Day-splitting: a separate post-processing function, not part of the
+  3. Day-splitting: a separate post-processing function, not part of the
      core optimization loop (see split_into_days below).
 
 No HTTP/DB dependencies here -- pure function of MfpInput -> MfpResult, so
@@ -65,37 +62,9 @@ def _best_insertion(candidate: Candidate, route: list[Point]) -> tuple[int, floa
     return best_index, best_delta
 
 
-def _two_opt(route: list[Point], deadline: float) -> list[Point]:
-    """Bounded 2-opt: repeatedly reverse sub-segments that shorten the
-    route, stopping as soon as no improving swap is found or the wall-clock
-    deadline is hit. Endpoints (route[0], route[-1]) are never moved --
-    2-opt here only reorders *positions*, and start/end are fixed by
-    definition, so reversal candidates are restricted to the interior.
-    """
-    improved = True
-    while improved and time.monotonic() < deadline:
-        improved = False
-        for i in range(1, len(route) - 2):
-            if time.monotonic() >= deadline:
-                break
-            for j in range(i + 1, len(route) - 1):
-                a, b = route[i - 1], route[i]
-                c, d = route[j], route[j + 1]
-                current = distance_m(a, b) + distance_m(c, d)
-                swapped = distance_m(a, c) + distance_m(b, d)
-                if swapped < current:
-                    route[i : j + 1] = reversed(route[i : j + 1])
-                    improved = True
-    return route
-
-
-def solve(input: MfpInput, max_solve_time_ms: int = 3000) -> MfpResult:
+def solve(input: MfpInput) -> MfpResult:
     """Runs the greedy detour-budgeted insertion heuristic and returns the
     final stop sequence, selected candidates, and solve stats.
-
-    max_solve_time_ms bounds the optional local-search refinement step (not
-    the initial greedy pass, which is fast/deterministic) so the whole call
-    comfortably fits within the API's request timeout.
     """
     start_time = time.monotonic()
 
@@ -136,9 +105,6 @@ def solve(input: MfpInput, max_solve_time_ms: int = 3000) -> MfpResult:
         used_m += best_delta
         total_fun_score += best_candidate.fun_score
         remaining.remove(best_candidate)
-
-    deadline = start_time + max_solve_time_ms / 1000
-    route = _two_opt(route, deadline)
 
     total_distance_m = _route_distance_m(route)
     solve_time_ms = int((time.monotonic() - start_time) * 1000)
